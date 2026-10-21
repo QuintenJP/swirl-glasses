@@ -1,0 +1,827 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Swirl Glasses</title>
+<style>
+  :root {
+    --bg: #101216; --panel: #1a1d23; --line: #2c3038; --text: #e8e9ec; --muted: #9298a3;
+    --accent: #ff8a1f; --accent2: #3d8bff; --ok: #3fbf74; --bad: #ff5d5d;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, sans-serif; }
+  main { max-width: 820px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 22px; margin: 0; }
+  #status { color: var(--muted); }
+  #status.ok { color: var(--ok); }
+  #status.bad { color: var(--bad); }
+  canvas { display: block; width: 100%; height: auto; margin: 16px 0; background: #000; border-radius: 12px; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 600; }
+  button:disabled { opacity: .45; cursor: default; }
+  fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 16px 0 0; padding: 10px 14px 14px; }
+  legend { color: var(--muted); padding: 0 6px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px 20px; }
+  label { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; }
+  label input[type=range], label select { grid-column: 1 / -1; width: 100%; }
+  label output { color: var(--muted); font-variant-numeric: tabular-nums; }
+  label.check { grid-template-columns: auto 1fr; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-top: 16px; }
+  .stat { background: var(--panel); border-radius: 8px; padding: 8px 10px; }
+  .stat b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 13px; }
+  #log { background: var(--panel); border-radius: 8px; padding: 8px 10px; color: var(--muted); font: 12px/1.5 ui-monospace, monospace; max-height: 140px; overflow: auto; white-space: pre-wrap; margin-top: 16px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  #pocket { position: fixed; inset: 0; z-index: 10; background: #000; color: #333; display: flex; align-items: flex-end;
+    justify-content: center; padding: 24px; font-size: 13px; user-select: none; }
+  #pocket[hidden] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Swirl Glasses</h1>
+    <span id="status">Not connected (preview only)</span>
+  </header>
+
+  <canvas id="preview" width="720" height="240"></canvas>
+
+  <div class="buttons">
+    <button id="connect" class="primary">Connect glasses</button>
+    <button id="connectAll" title="Use if the glasses don't appear in the list">Connect (show all devices)</button>
+    <button id="test" disabled>Test pattern</button>
+    <button id="swirl" disabled>Play design</button>
+    <button id="reenter" disabled title="Re-send the command that stops the built-in animation">Re-enter DIY mode</button>
+    <button id="disconnect" disabled>Disconnect</button>
+    <button id="pocketBtn" title="Black screen for the pocket; double-tap to leave">Pocket mode</button>
+  </div>
+  <p class="hint">Close the Shining Glasses app on your phone first: the glasses take one connection at a time.
+    If they stop showing up after a disconnect, switch them off and on.</p>
+
+  <fieldset>
+    <legend>Design</legend>
+    <div class="grid">
+      <label>Design
+        <select id="design">
+          <option value="swirl">Swirl</option>
+          <option value="mist">Nebula mist</option>
+        </select>
+      </label>
+      <label>Colour 1 <input type="color" id="color1" value="#0a5cff"></label>
+      <label>Colour 2 <input type="color" id="color2" value="#ff6a00"></label>
+    </div>
+  </fieldset>
+
+  <fieldset id="mistSettings">
+    <legend>Nebula mist</legend>
+    <div class="grid">
+      <label>Drift speed <output data-for="drift"></output><input type="range" id="drift" min="0.02" max="0.6" step="0.02" value="0.16"></label>
+      <label>Wisp size <output data-for="mistScale"></output><input type="range" id="mistScale" min="2" max="10" step="0.5" value="4.5"></label>
+      <label>Curl <output data-for="warp"></output><input type="range" id="warp" min="0" max="3" step="0.1" value="1.4"></label>
+      <label>Shades <output data-for="mistShades"></output><input type="range" id="mistShades" min="1" max="5" step="1" value="4"></label>
+      <label>Dark gaps <output data-for="dark"></output><input type="range" id="dark" min="0" max="0.8" step="0.05" value="0.15"></label>
+      <label>Blue ↔ orange balance <output data-for="balance"></output><input type="range" id="balance" min="0" max="1" step="0.05" value="0.5"></label>
+      <label>Edge fade <output data-for="edge"></output><input type="range" id="edge" min="0" max="1" step="0.05" value="0.45"></label>
+      <label>Colour blend
+        <select id="hueSteps">
+          <option value="2">Pure colours only</option>
+          <option value="3">Add a pale glow where they meet</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="stars" checked> Faint twinkling stars</label>
+      <label class="check"><input type="checkbox" id="sameEyes"> Mirror the mist between eyes</label>
+    </div>
+  </fieldset>
+
+  <fieldset id="swirlSettings">
+    <legend>Swirl</legend>
+    <div class="grid">
+      <label>Speed <output data-for="speed"></output><input type="range" id="speed" min="5" max="360" step="5" value="30"></label>
+      <label>Arms per colour <output data-for="arms"></output><input type="range" id="arms" min="1" max="4" step="1" value="2"></label>
+      <label>Twist <output data-for="twist"></output><input type="range" id="twist" min="0" max="1.5" step="0.05" value="0.55"></label>
+      <label>Shades <output data-for="shades"></output><input type="range" id="shades" min="1" max="4" step="1" value="2"></label>
+      <label>Eye size <output data-for="radius"></output><input type="range" id="radius" min="3" max="6.5" step="0.25" value="6"></label>
+      <label>Eye width <output data-for="stretch"></output><input type="range" id="stretch" min="1" max="1.6" step="0.05" value="1.35"></label>
+      <label>Pupil <output data-for="pupil"></output><input type="range" id="pupil" min="0" max="3" step="0.25" value="1"></label>
+      <label>Colours
+        <select id="colorMode">
+          <option value="mixed">Both colours in each eye</option>
+          <option value="split">Left eye colour 1, right eye colour 2</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="smoothing" checked> Smooth edges</label>
+      <label class="check"><input type="checkbox" id="mirrorSpin" checked> Eyes spin in opposite directions</label>
+      <label class="check"><input type="checkbox" id="reverse"> Reverse spin</label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Backup slideshow (runs on the glasses alone)</legend>
+    <div class="grid">
+      <label>Frames <output data-for="slides"></output><input type="range" id="slides" min="2" max="20" step="1" value="10"></label>
+    </div>
+    <div class="buttons" style="margin-top: 10px">
+      <button id="previewSlides">Preview slideshow</button>
+      <button id="upload" disabled>Save slideshow to glasses</button>
+    </div>
+    <p class="hint">Saves one loop of the current design to the glasses, which then play it with no phone at their fixed speed
+      (about 2 frames a second). It replaces the DIY designs stored on the glasses. Press Play design to stream again.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Glasses link</legend>
+    <div class="grid">
+      <label>Brightness <output data-for="brightness"></output><input type="range" id="brightness" min="1" max="100" step="1" value="50"></label>
+      <label>Packet gap <output data-for="gap"></output><input type="range" id="gap" min="0" max="30" step="1" value="6"></label>
+      <label class="check"><input type="checkbox" id="flipX"> Mirror left/right</label>
+      <label class="check"><input type="checkbox" id="flipY"> Flip upside down</label>
+    </div>
+    <p class="hint">The page streams continuously: each Bluetooth packet updates the 8 pixels (of one colour) that are most out of date.
+      A smaller packet gap means smoother motion, until pixels start going missing or sticking; then raise it.
+      If "pixels behind" stays high, lower the speed or the shades. Keep this tab in front: Chrome slows background tabs.</p>
+  </fieldset>
+
+  <div class="stats">
+    <div class="stat"><b id="sFps">–</b><span>packets/s</span></div>
+    <div class="stat"><b id="sPix">–</b><span>pixels updated/s</span></div>
+    <div class="stat"><b id="sPkt">–</b><span>pixels behind</span></div>
+    <div class="stat"><b id="sColors">–</b><span>colours on screen</span></div>
+  </div>
+
+  <div id="log"></div>
+</main>
+<div id="pocket" hidden>Still streaming to the glasses. Double-tap to show controls.</div>
+
+<script>
+"use strict";
+
+// ---- Protocol (from aks3310/glasses-eyes, shining-glass-protocol-report.md) ----
+const W = 36, H = 12, HALF = 18;
+const SERVICE = "0000fff0-0000-1000-8000-00805f9b34fb";
+const CMD_UUID = "d44bc439-abfd-45a2-b575-925416129600";   // AES-encrypted 16-byte commands
+const PAINT_UUID = "d44bc439-abfd-45a2-b575-92541612960b"; // plain live-paint packets
+const NOTIFY_UUID = "d44bc439-abfd-45a2-b575-925416129601"; // AES-encrypted replies
+const AES_KEY = Uint8Array.from("32672f7974ad43451d9c6c894a0e8764".match(/../g), h => parseInt(h, 16));
+
+let aesKey = null;
+// WebCrypto has no ECB. For a single block, CBC with a zero IV gives the same first block.
+async function encryptBlock(block) {
+  aesKey ??= await crypto.subtle.importKey("raw", AES_KEY, { name: "AES-CBC" }, false, ["encrypt"]);
+  const out = await crypto.subtle.encrypt({ name: "AES-CBC", iv: new Uint8Array(16) }, aesKey, block);
+  return new Uint8Array(out).slice(0, 16);
+}
+
+let aesDecKey = null;
+// Single-block ECB decrypt via CBC: append a block that decrypts to valid PKCS#7 padding.
+async function decryptBlock(block) {
+  aesDecKey ??= await crypto.subtle.importKey("raw", AES_KEY, { name: "AES-CBC" }, false, ["decrypt"]);
+  const pad = new Uint8Array(16).fill(16).map((b, i) => b ^ block[i]);
+  const data = new Uint8Array(32);
+  data.set(block); data.set(await encryptBlock(pad), 16);
+  return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-CBC", iv: new Uint8Array(16) }, aesDecKey, data));
+}
+
+async function describeReply(bytes) {
+  if (bytes.length < 16) return [...bytes].map(b => b.toString(16).padStart(2, "0")).join(" ");
+  const plain = await decryptBlock(bytes.slice(0, 16));
+  return new TextDecoder().decode(plain.slice(1, 1 + Math.min(plain[0], 15)));
+}
+
+async function command(opcode, ...args) {
+  const body = [...new TextEncoder().encode(opcode), ...args];
+  const block = new Uint8Array(16);
+  block[0] = body.length;
+  block.set(body, 1);
+  return encryptBlock(block);
+}
+
+function paintPacket(color, points) {
+  const p = new Uint8Array(20);
+  p[0] = 2 * points.length + 3;
+  p[1] = (color >> 16) & 255; p[2] = (color >> 8) & 255; p[3] = color & 255;
+  points.forEach(([col, row], n) => { p[4 + 2 * n] = col; p[5 + 2 * n] = row; });
+  return p;
+}
+
+// ---- Settings ----
+const $ = id => document.getElementById(id);
+const settingIds = ["design", "color1", "color2",
+  "drift", "mistScale", "warp", "mistShades", "dark", "balance", "edge", "hueSteps", "stars", "sameEyes",
+  "speed", "arms", "twist", "shades", "radius", "stretch", "pupil", "colorMode", "smoothing", "mirrorSpin", "reverse",
+  "slides", "brightness", "gap", "flipX", "flipY"];
+const units = { speed: v => `${v}°/s`, gap: v => `${v} ms`, brightness: v => `${v}%` };
+const s = {};
+
+function readSettings() {
+  for (const id of settingIds) {
+    const el = $(id);
+    s[id] = el.type === "checkbox" ? el.checked : el.type === "range" ? Number(el.value) : el.value;
+  }
+  s.rgb1 = parseInt(s.color1.slice(1), 16);
+  s.rgb2 = parseInt(s.color2.slice(1), 16);
+  s.hueSteps = Number(s.hueSteps);
+  $("mistSettings").hidden = s.design !== "mist";
+  $("swirlSettings").hidden = s.design !== "swirl";
+  for (const out of document.querySelectorAll("output[data-for]")) {
+    const v = s[out.dataset.for];
+    out.textContent = units[out.dataset.for] ? units[out.dataset.for](v) : v;
+  }
+}
+
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("swirl-settings") || "{}");
+    for (const [id, v] of Object.entries(saved)) {
+      const el = $(id);
+      if (!el) continue;
+      if (el.type === "checkbox") el.checked = v; else el.value = v;
+    }
+  } catch { /* storage unavailable: keep defaults */ }
+}
+
+function saveSettings() {
+  try {
+    const out = {};
+    for (const id of settingIds) out[id] = $(id).type === "checkbox" ? $(id).checked : $(id).value;
+    localStorage.setItem("swirl-settings", JSON.stringify(out));
+  } catch { /* ignore */ }
+}
+
+// ---- Rendering: a frame is an Int32Array of 0xRRGGBB, index row * W + col, as seen by someone facing you ----
+function scale(color, k) {
+  return (Math.round(((color >> 16) & 255) * k) << 16) | (Math.round(((color >> 8) & 255) * k) << 8) | Math.round((color & 255) * k);
+}
+
+// Each LED averages SS × SS sample points spread across its area, so edges that cross an LED light it
+// partly (anti-aliasing) instead of snapping it fully on or off.
+function renderSwirl(t) {
+  const frame = new Int32Array(W * H);
+  const cy = (H - 1) / 2;
+  const ss = s.smoothing ? 4 : 1;
+  for (let eye = 0; eye < 2; eye++) {
+    const cx = eye * HALF + (HALF - 1) / 2;
+    const mirror = eye === 1 && s.mirrorSpin ? -1 : 1;
+    const angle = (s.reverse ? -1 : 1) * s.speed * Math.PI / 180 * t;
+    for (let row = 0; row < H; row++) {
+      for (let col = eye * HALF; col < (eye + 1) * HALF; col++) {
+        let pos = 0, neg = 0;  // summed strength of colour 1 and colour 2 across the samples
+        for (let sy = 0; sy < ss; sy++) {
+          for (let sx = 0; sx < ss; sx++) {
+            const px = col + (sx + 0.5) / ss - 0.5, py = row + (sy + 0.5) / ss - 0.5;
+            const dx = mirror * (px - cx) / s.stretch, dy = py - cy;
+            const r = Math.hypot(dx, dy);
+            if (r > s.radius || r < s.pupil) continue;
+            const v = Math.cos(s.arms * (Math.atan2(dy, dx) - angle + s.twist * r));
+            if (v > 0) pos += v; else neg -= v;
+          }
+        }
+        let base, strength;
+        if (s.colorMode === "split") {
+          base = eye === 0 ? s.rgb1 : s.rgb2;
+          strength = pos;
+        } else {
+          // One colour per LED (a blue/orange mix looks muddy); the other colour's share dims it.
+          base = pos >= neg ? s.rgb1 : s.rgb2;
+          strength = Math.max(pos, neg) - 0.5 * Math.min(pos, neg);
+        }
+        const level = Math.round(clamp01(strength / (ss * ss)) * s.shades);
+        if (level > 0) frame[row * W + col] = scale(base, Math.pow(level / s.shades, 1.8));
+      }
+    }
+  }
+  return frame;
+}
+
+// ---- Nebula mist: slowly evolving, domain-warped value noise ----
+function hash3(x, y, z) {
+  let h = Math.imul(x, 0x27d4eb2d) ^ Math.imul(y, 0x165667b1) ^ Math.imul(z, 0x9e3779b1);
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+const smooth = t => t * t * (3 - 2 * t);
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp01 = v => Math.min(1, Math.max(0, v));
+
+function noise3(x, y, z) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  const u = smooth(x - xi), v = smooth(y - yi), w = smooth(z - zi);
+  const c = (dx, dy, dz) => hash3(xi + dx, yi + dy, zi + dz);
+  return lerp(
+    lerp(lerp(c(0, 0, 0), c(1, 0, 0), u), lerp(c(0, 1, 0), c(1, 1, 0), u), v),
+    lerp(lerp(c(0, 0, 1), c(1, 0, 1), u), lerp(c(0, 1, 1), c(1, 1, 1), u), v), w);
+}
+
+function fbm(x, y, z) {
+  return (noise3(x, y, z) * 4 + noise3(x * 2 + 5.2, y * 2 + 1.3, z * 1.7) * 2 + noise3(x * 4 + 9.7, y * 4 + 3.1, z * 2.3)) / 7;
+}
+
+// Quantize v (0..1) to 0..n, but only leave the previous level once v is clearly past the boundary.
+// Without this, pixels near a boundary flicker and waste packets.
+function sticky(v, n, prev) {
+  const x = v * n;
+  if (prev < 0 || prev > n || x > prev + 0.65 || x < prev - 0.65) return Math.round(x);
+  return prev;
+}
+
+let prevLevel = new Int8Array(W * H).fill(-1), prevHue = new Int8Array(W * H).fill(-1);
+
+function blend(a, b) {  // a bright, pale mix of two colours
+  const r = ((a >> 16 & 255) + (b >> 16 & 255)) / 2, g = ((a >> 8 & 255) + (b >> 8 & 255)) / 2, bl = ((a & 255) + (b & 255)) / 2;
+  const k = 255 / Math.max(r, g, bl, 1), lift = 0.35;
+  return scale(((Math.round(lerp(r * k, 255, lift)) << 16) | (Math.round(lerp(g * k, 255, lift)) << 8) | Math.round(lerp(bl * k, 255, lift))), 1);
+}
+
+function renderMist(t) {
+  const frame = new Int32Array(W * H);
+  const z = t * s.drift, cy = (H - 1) / 2;
+  const hues = s.hueSteps === 3 ? [s.rgb1, blend(s.rgb1, s.rgb2), s.rgb2] : [s.rgb1, s.rgb2];
+  for (let eye = 0; eye < 2; eye++) {
+    const cx = eye * HALF + (HALF - 1) / 2;
+    const mirror = s.sameEyes && eye === 1 ? -1 : 1;
+    const seed = s.sameEyes ? 0 : eye * 41.3;
+    for (let row = 0; row < H; row++) {
+      for (let col = eye * HALF; col < (eye + 1) * HALF; col++) {
+        const i = row * W + col;
+        const lx = mirror * (col - cx), ly = row - cy;
+        const x = lx / s.mistScale + seed, y = ly / s.mistScale;
+        // Warp the coordinates with another noise field so the mist curls instead of just sliding.
+        const qx = fbm(x + 1.7, y + 9.2, z * 0.6) - 0.5, qy = fbm(x + 8.3, y + 2.8, z * 0.6) - 0.5;
+        const density = clamp01((fbm(x + 2 * s.warp * qx, y + 2 * s.warp * qy, z) - 0.5) * 2.8 + 0.5);
+        const hueVal = clamp01((fbm(x * 0.6 + 21.4 + s.warp * qy, y * 0.6 + 5.1 + s.warp * qx, z * 0.5) - 0.5) * 3.2 + 0.5 + (s.balance - 0.5));
+
+        const er = Math.hypot(lx / (HALF / 2), ly / (H / 2));
+        const mask = s.edge === 0 ? 1 : clamp01((1.1 - er) / s.edge);
+        let bright = clamp01((density - s.dark) / (1 - s.dark)) * mask;
+
+        let level = prevLevel[i] = sticky(bright, s.mistShades, prevLevel[i]);
+        const hue = prevHue[i] = sticky(hueVal, hues.length - 1, prevHue[i]);
+        let color = level ? scale(hues[hue], Math.pow(level / s.mistShades, 1.8)) : 0;
+
+        if (s.stars && mask > 0.6) {  // rare stars that fade in and out over a few seconds
+          const period = 4, k = Math.floor((t + hash3(col, row, 7) * period) / period);
+          if (hash3(col, row, k) > 0.985) {
+            const phase = ((t + hash3(col, row, 7) * period) / period) % 1;
+            const glow = Math.sin(Math.PI * phase);
+            if (glow > 0.35) color = scale(0xfff4e8, glow > 0.75 ? 0.9 : 0.35);
+          }
+        }
+        frame[i] = color;
+      }
+    }
+  }
+  return frame;
+}
+
+function renderTest() {
+  const frame = new Int32Array(W * H);
+  const corner = (c0, r0, color) => { for (let r = r0; r < r0 + 2; r++) for (let c = c0; c < c0 + 2; c++) frame[r * W + c] = color; };
+  corner(0, 0, 0xff0000); corner(W - 2, 0, 0x00ff00); corner(0, H - 2, 0x0000ff); corner(W - 2, H - 2, 0xffffff);
+  for (let r = 0; r < H; r++) { frame[r * W + HALF - 1] = 0x303030; frame[r * W + HALF] = 0x303030; }
+  return frame;
+}
+
+// ---- Preview ----
+const canvas = $("preview"), ctx = canvas.getContext("2d");
+function draw(frame) {
+  const pitch = canvas.width / W;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (let i = 0; i < W * H; i++) {
+    const c = frame[i];
+    ctx.fillStyle = c > 0 ? `rgb(${(c >> 16) & 255},${(c >> 8) & 255},${c & 255})` : "#1b1d21";
+    ctx.beginPath();
+    ctx.arc((i % W + 0.5) * pitch, (Math.floor(i / W) + 0.5) * pitch, pitch * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ---- Packet planning: send only what changed, grouped by colour, plus a slow background refresh ----
+let displayed = new Int32Array(W * H).fill(-1);  // what we believe the glasses show; -1 = unknown
+let refreshAt = 0;
+let behind = 0;                                    // pixels that differ from the animation right now
+
+function colorError(want, have) {
+  if (have < 0) return 765;
+  return Math.abs((want >> 16 & 255) - (have >> 16 & 255)) + Math.abs((want >> 8 & 255) - (have >> 8 & 255)) + Math.abs((want & 255) - (have & 255));
+}
+
+// Fill a packet's spare slots with pixels that already show this colour. Re-sending them is free
+// and heals any pixel a dropped packet left wrong.
+function fillRefresh(idx, color, target) {
+  for (let n = 0; n < W * H && idx.length < 8; n++) {
+    const i = refreshAt; refreshAt = (refreshAt + 1) % (W * H);
+    if (target[i] === color && displayed[i] === color && !idx.includes(i)) idx.push(i);
+  }
+}
+
+// No frames: each packet fixes the 8 most-wrong pixels that share a colour, judged against the
+// animation at this instant. The display tracks the motion continuously instead of jumping frame to frame.
+function nextPacket(target, idle) {
+  const byColor = new Map();
+  behind = 0;
+  for (let i = 0; i < W * H; i++) {
+    if (target[i] === displayed[i]) continue;
+    behind++;
+    if (!byColor.has(target[i])) byColor.set(target[i], []);
+    byColor.get(target[i]).push([colorError(target[i], displayed[i]), i]);
+  }
+  let best = null, bestScore = 0;
+  for (const [color, list] of byColor) {
+    list.sort((a, b) => b[0] - a[0]);
+    const top = list.slice(0, 8);
+    const score = top.reduce((sum, [e]) => sum + e, 0);
+    if (score > bestScore) { bestScore = score; best = { color, idx: top.map(([, i]) => i) }; }
+  }
+  if (!best) {
+    if (!idle) return null;
+    best = { color: target[refreshAt], idx: [] };  // nothing wrong: refresh a few pixels anyway
+  }
+  const changed = best.idx.length;
+  fillRefresh(best.idx, best.color, target);
+  return best.idx.length ? { ...best, changed } : null;
+}
+
+function toGlasses(i) {
+  const col = i % W, row = Math.floor(i / W);
+  return [s.flipX ? W - 1 - col : col, s.flipY ? H - 1 - row : row];
+}
+
+// ---- Bluetooth ----
+const DATA_UUID = "d44bc439-abfd-45a2-b575-92541612960a";  // plain bulk-upload frames (DIY images)
+let device = null, cmdChar = null, paintChar = null, dataChar = null, connected = false;
+let wantConnected = false;  // true from Connect until Disconnect; drives automatic reconnecting
+
+function log(msg) {
+  const el = $("log");
+  el.textContent += `${new Date().toLocaleTimeString()}  ${msg}\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function setStatus(text, cls = "") { $("status").textContent = text; $("status").className = cls; }
+
+function updateButtons() {
+  $("connect").disabled = wantConnected; $("connectAll").disabled = wantConnected;
+  for (const id of ["test", "swirl", "reenter", "upload"]) $(id).disabled = !connected;
+  $("disconnect").disabled = !wantConnected;
+}
+
+async function writeCmd(data) {
+  if (cmdChar.properties.write) await cmdChar.writeValueWithResponse(data);
+  else await cmdChar.writeValueWithoutResponse(data);
+}
+
+async function writePaint(data) {
+  if (paintChar.properties.writeWithoutResponse) await paintChar.writeValueWithoutResponse(data);
+  else await paintChar.writeValueWithResponse(data);
+}
+
+async function writeData(data) {
+  if (dataChar.properties.writeWithoutResponse) await dataChar.writeValueWithoutResponse(data);
+  else await dataChar.writeValueWithResponse(data);
+}
+
+// Replies arrive as notifications; uploads wait for specific ones (DATSOK, REOK, ...).
+let replyWaiters = [];
+function onReply(text) {
+  if (text !== "REOK") log(`Glasses replied: ${text}`);
+  replyWaiters = replyWaiters.filter(w => {
+    if (!text.startsWith(w.want) && text !== "ERROR") return true;
+    w.resolve(text);
+    return false;
+  });
+}
+
+// Register the wait before sending, so a fast reply isn't missed.
+function expectReply(want, ms = 3000) {
+  return new Promise((resolve, reject) => {
+    const w = { want, resolve };
+    replyWaiters.push(w);
+    setTimeout(() => {
+      if (!replyWaiters.includes(w)) return;
+      replyWaiters = replyWaiters.filter(x => x !== w);
+      reject(new Error(`no ${want} reply`));
+    }, ms);
+  });
+}
+
+async function sendAndExpect(data, want, write = writeCmd, ms) {
+  const reply = expectReply(want, ms);
+  await write(data);
+  const text = await reply;
+  if (text !== want) throw new Error(`glasses replied ${text} instead of ${want}`);
+}
+
+async function connect(showAll) {
+  if (!navigator.bluetooth) {
+    log("This browser has no Web Bluetooth. Use Chrome on a computer or Android, or the Bluefy app on iPhone.");
+    return;
+  }
+  try {
+    device = await navigator.bluetooth.requestDevice(showAll
+      ? { acceptAllDevices: true, optionalServices: [SERVICE] }
+      : { filters: [{ manufacturerData: [{ companyIdentifier: 0x5254, dataPrefix: new Uint8Array([0x00, 0x41]) }] }],
+          optionalServices: [SERVICE] });
+  } catch (err) {
+    if (err.name !== "NotFoundError") log(`Connect failed: ${err.message}`);
+    return;
+  }
+  device.addEventListener("gattserverdisconnected", onDisconnected);
+  wantConnected = true;
+  updateButtons();
+  keepAwake();
+  try {
+    await setupGatt();
+  } catch (err) {
+    log(`Connect failed: ${err.message}`);
+    reconnect();
+  }
+}
+
+// Connect to the already-chosen device. Reconnecting reuses it, so no device chooser is needed.
+async function setupGatt() {
+  setStatus(`Connecting to ${device.name || "glasses"}…`);
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(SERVICE);
+  cmdChar = await service.getCharacteristic(CMD_UUID);
+  paintChar = await service.getCharacteristic(PAINT_UUID);
+  dataChar = await service.getCharacteristic(DATA_UUID);
+  log(`Connected to ${device.name || device.id}. Paint channel: ${paintChar.properties.writeWithoutResponse ? "fast writes" : "acknowledged writes"}.`);
+  // The official app subscribes to replies before sending any command.
+  const notifyChar = await service.getCharacteristic(NOTIFY_UUID);
+  notifyChar.addEventListener("characteristicvaluechanged", async e => {
+    onReply(await describeReply(new Uint8Array(e.target.value.buffer)));
+  });
+  await notifyChar.startNotifications();
+  await sleep(500);
+  if (mode !== "paused") await enterDiy();  // paused = the stored slideshow is playing; leave it
+  await writeCmd(await command("LIGHT", s.brightness));
+  connected = true;
+  setStatus(`Connected: ${device.name || "glasses"}`, "ok");
+  updateButtons();
+}
+
+// Enter live-paint mode with the screen cleared; this stops the built-in animation.
+async function enterDiy() {
+  await writeCmd(await command("SMVEW", 1));
+  log("Sent: enter DIY mode (clear screen).");
+  await sleep(300);
+  displayed = new Int32Array(W * H);  // all black after the clear
+}
+
+function onDisconnected() {
+  connected = false;
+  updateButtons();
+  if (!wantConnected) {
+    setStatus("Disconnected.");
+    log("Glasses disconnected.");
+    return;
+  }
+  log("Connection lost. Reconnecting…");
+  reconnect();
+}
+
+let reconnecting = false;
+async function reconnect() {
+  if (reconnecting) return;
+  reconnecting = true;
+  for (let attempt = 1; wantConnected && !connected; attempt++) {
+    setStatus(`Connection lost. Reconnecting (attempt ${attempt})… If this keeps failing, switch the glasses off and on.`, "bad");
+    try {
+      await setupGatt();
+      log("Reconnected.");
+    } catch (err) {
+      if (device.gatt.connected) device.gatt.disconnect();
+      await sleep(Math.min(10000, 1500 * attempt));
+    }
+  }
+  reconnecting = false;
+}
+
+async function disconnect() {
+  wantConnected = false;
+  if (device?.gatt.connected) {
+    if (mode !== "paused") {
+      try { await writeCmd(await command("SMVEW", 0)); } catch { /* leaving anyway */ }  // leave DIY mode without saving
+    }
+    device.gatt.disconnect();
+  }
+  connected = false;
+  setStatus("Disconnected.");
+  releaseAwake();
+  updateButtons();
+}
+
+let brightnessTimer = null;
+function sendBrightnessSoon() {
+  clearTimeout(brightnessTimer);
+  brightnessTimer = setTimeout(async () => {
+    if (connected) try { await writeCmd(await command("LIGHT", s.brightness)); } catch (err) { log(`Brightness failed: ${err.message}`); }
+  }, 150);
+}
+
+// ---- Backup slideshow: stored on the glasses, plays with no Bluetooth at their fixed ~2 frames/s ----
+
+// DIY image payload (report §5.1): 72-byte column-major on/off bitmap, then 432 RGB triples, column-major.
+function diyPayload(frame) {
+  const out = new Uint8Array(72 + W * H * 3);
+  for (let i = 0; i < W * H; i++) {
+    const c = frame[i];
+    if (c <= 0) continue;
+    const [col, row] = toGlasses(i);
+    if (row < 8) out[2 * col] |= 0x80 >> row; else out[2 * col + 1] |= 0x80 >> (row - 8);
+    const k = 72 + (col * H + row) * 3;
+    out[k] = c >> 16 & 255; out[k + 1] = c >> 8 & 255; out[k + 2] = c & 255;
+  }
+  return out;
+}
+
+// One image (report §5.2): DATS, then numbered chunks each acknowledged with REOK, then DATCP.
+async function uploadImage(payload, chunkSize) {
+  await sendAndExpect(await command("DATS", payload.length >> 8, payload.length & 255, 0, 72, 1), "DATSOK");
+  for (let k = 0, off = 0; off < payload.length; k++, off += chunkSize) {
+    const part = payload.slice(off, off + chunkSize);
+    const packet = new Uint8Array(chunkSize + 2);
+    packet[0] = part.length + 1;
+    packet[1] = k;
+    packet.set(part, 2);
+    await sendAndExpect(packet, "REOK", writeData, 2000);
+  }
+  await sendAndExpect(await command("DATCP"), "DATCPOK", writeCmd, 5000);
+}
+
+// Frames for one seamless loop of the current design.
+function slideshowFrames(n) {
+  if (s.design === "swirl") {
+    const period = (2 * Math.PI / s.arms) / (s.speed * Math.PI / 180);  // seconds until the swirl looks the same again
+    return Array.from({ length: n }, (_, k) => renderSwirl(k * period / n));
+  }
+  prevLevel.fill(-1); prevHue.fill(-1);
+  return Array.from({ length: n }, (_, k) => renderMist(k * 0.5));
+}
+
+async function uploadSlideshow() {
+  const n = s.slides;
+  if (!confirm(`Save a ${n}-frame slideshow to the glasses?\n\nThis replaces the DIY designs stored on the glasses ` +
+      `(copies saved in the phone app are not affected). The glasses show an upload screen for a few seconds.`)) return;
+  const frames = slideshowFrames(n).map(diyPayload);
+  mode = "paused";
+  await sleep(300);  // let the streaming loop finish its last write
+  $("upload").disabled = true;
+  try {
+    // Large chunks need a large Bluetooth packet size (MTU); fall back to the small size if they're refused.
+    for (const chunkSize of [98, 18]) {
+      try {
+        log(`Uploading ${n} frames (${chunkSize}-byte chunks)…`);
+        await sendAndExpect(await command("MANY", n, 1), "MANYOK");
+        for (let i = 0; i < n; i++) {
+          await uploadImage(frames[i], chunkSize);
+          log(`Frame ${i + 1} of ${n} saved.`);
+        }
+        await sendAndExpect(await command("MANCPOK"), "MANCPOK", writeCmd, 5000);
+        await writeCmd(await command("PLAY"));
+        log("Slideshow saved and playing. It stays on the glasses after you disconnect. Press Play design to stream again.");
+        return;
+      } catch (err) {
+        log(`Upload failed: ${err.message}.`);
+        if (chunkSize === 18) throw err;
+        log("Retrying with smaller chunks…");
+        await sleep(1000);
+      }
+    }
+  } catch {
+    log("Upload didn't work. Your stored slideshow may be incomplete; try again, or save one from the phone app.");
+    mode = "design";
+    try { await enterDiy(); } catch { /* the streaming loop will report problems */ }
+  } finally {
+    updateButtons();
+  }
+}
+
+// ---- Night-out helpers: keep the screen on, and a black screen for the pocket ----
+let wakeLock = null;
+async function keepAwake() {
+  try {
+    if ("wakeLock" in navigator && document.visibilityState === "visible") wakeLock = await navigator.wakeLock.request("screen");
+  } catch { /* not supported: the phone's auto-lock must be turned off instead */ }
+}
+function releaseAwake() { wakeLock?.release().catch(() => {}); wakeLock = null; }
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && wantConnected) keepAwake();
+});
+
+let pocket = false, lastTap = 0;
+function setPocket(on) {
+  pocket = on;
+  $("pocket").hidden = !on;
+  if (on) document.documentElement.requestFullscreen?.().catch(() => {});
+  else if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+
+// ---- Main loop ----
+let mode = "design";  // "design" streams the chosen design; also "test", "slides" (preview the slideshow), "paused"
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+const SIM_WRITE_MS = 4;  // rough time one Bluetooth write takes, for the preview when not connected
+
+let slidePreview = null;
+function currentTarget(t) {
+  if (mode === "test") return renderTest();
+  if (mode === "slides") return slidePreview[Math.floor(t * 2) % slidePreview.length];
+  return s.design === "mist" ? renderMist(t) : renderSwirl(t);
+}
+
+async function loop() {
+  const t0 = performance.now();
+  let packets = 0, pixels = 0, windowStart = t0, lastSend = t0, target = null;
+  for (;;) {
+    if (mode === "paused") { await sleep(50); continue; }
+    const start = performance.now();
+    target = currentTarget((start - t0) / 1000);
+    const packet = nextPacket(target, start - lastSend > 60);
+
+    if (packet) {
+      if (connected) {
+        try {
+          await writePaint(paintPacket(packet.color, packet.idx.map(toGlasses)));
+        } catch (err) {
+          if (connected) log(`Send failed: ${err.message}`);
+          displayed.fill(-1);
+          await sleep(200);
+          continue;
+        }
+      } else {
+        await sleep(SIM_WRITE_MS);
+      }
+      for (const i of packet.idx) displayed[i] = packet.color;
+      packets++; pixels += packet.changed; lastSend = performance.now();
+    }
+
+    const now = performance.now();
+    if (now - windowStart > 1000) {
+      const secs = (now - windowStart) / 1000;
+      $("sFps").textContent = Math.round(packets / secs);
+      $("sPix").textContent = Math.round(pixels / secs);
+      $("sColors").textContent = new Set(target).size - (target.includes(0) ? 1 : 0);
+      packets = 0; pixels = 0; windowStart = now;
+    }
+    $("sPkt").textContent = behind;
+
+    await sleep(packet ? s.gap : 8);
+  }
+}
+
+// The preview shows what the glasses should be showing, packet by packet. Skipped in pocket mode to save battery.
+function drawLoop() {
+  if (!pocket) draw(displayed);
+  requestAnimationFrame(drawLoop);
+}
+
+// ---- Wiring ----
+loadSettings();
+readSettings();
+for (const id of settingIds) {
+  $(id).addEventListener("input", () => {
+    const flipChanged = (id === "flipX" || id === "flipY");
+    readSettings(); saveSettings();
+    if (id === "brightness") sendBrightnessSoon();
+    if (flipChanged && connected) displayed.fill(-1);  // pixels move: repaint everything
+  });
+}
+$("connect").onclick = () => connect(false);
+$("connectAll").onclick = () => connect(true);
+$("disconnect").onclick = disconnect;
+$("test").onclick = () => { mode = "test"; log("Test pattern: someone facing you should see red top-left, green top-right, blue bottom-left, white bottom-right."); };
+$("swirl").onclick = async () => {
+  if (mode === "paused" && connected) {
+    try { await enterDiy(); } catch (err) { log(`Couldn't switch back: ${err.message}`); return; }
+  }
+  mode = "design";
+};
+$("reenter").onclick = async () => {
+  try { await enterDiy(); } catch (err) { log(`Re-enter failed: ${err.message}`); }
+};
+$("previewSlides").onclick = () => {
+  if (mode === "paused") { log("The slideshow is playing on the glasses. Press Play design first."); return; }
+  slidePreview = slideshowFrames(s.slides);
+  mode = "slides";
+  log(`Previewing the ${s.slides}-frame slideshow at the glasses' ~2 frames/s. Press Play design to go back.`);
+};
+$("upload").onclick = uploadSlideshow;
+$("pocketBtn").onclick = () => setPocket(true);
+$("pocket").addEventListener("click", () => {  // double tap to leave, so pocket bumps don't
+  const now = Date.now();
+  if (now - lastTap < 450) setPocket(false);
+  lastTap = now;
+});
+window.addEventListener("pagehide", () => { if (wantConnected) disconnect(); });
+updateButtons();
+loop();
+drawLoop();
+</script>
+</body>
+</html>
