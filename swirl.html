@@ -66,6 +66,7 @@
     <div class="grid">
       <label>Design
         <select id="design">
+          <option value="yinyang">Yin-yang</option>
           <option value="swirl">Swirl</option>
           <option value="mist">Nebula mist</option>
         </select>
@@ -96,22 +97,40 @@
     </div>
   </fieldset>
 
+  <fieldset id="yinyangSettings">
+    <legend>Yin-yang</legend>
+    <div class="grid">
+      <label>Halves per colour <output data-for="yyArms"></output><input type="range" id="yyArms" min="1" max="3" step="1" value="1"></label>
+      <label>Twist <output data-for="yyTwist"></output><input type="range" id="yyTwist" min="0" max="1.5" step="0.05" value="0.35"></label>
+      <label>Lead and trail <output data-for="yyTrail"></output><input type="range" id="yyTrail" min="0" max="0.8" step="0.05" value="0.45"></label>
+      <label>Dot size <output data-for="yyDot"></output><input type="range" id="yyDot" min="0" max="2" step="0.1" value="0.9"></label>
+    </div>
+    <p class="hint">Lead and trail makes each colour brightest at its front edge and dimmer toward its tail. 0 means two flat colours.
+      Dot size 0 removes the dots.</p>
+  </fieldset>
+
   <fieldset id="swirlSettings">
     <legend>Swirl</legend>
     <div class="grid">
-      <label>Speed <output data-for="speed"></output><input type="range" id="speed" min="5" max="360" step="5" value="30"></label>
       <label>Arms per colour <output data-for="arms"></output><input type="range" id="arms" min="1" max="4" step="1" value="2"></label>
       <label>Twist <output data-for="twist"></output><input type="range" id="twist" min="0" max="1.5" step="0.05" value="0.55"></label>
       <label>Shades <output data-for="shades"></output><input type="range" id="shades" min="1" max="4" step="1" value="2"></label>
-      <label>Eye size <output data-for="radius"></output><input type="range" id="radius" min="3" max="6.5" step="0.25" value="6"></label>
-      <label>Eye width <output data-for="stretch"></output><input type="range" id="stretch" min="1" max="1.6" step="0.05" value="1.35"></label>
-      <label>Pupil <output data-for="pupil"></output><input type="range" id="pupil" min="0" max="3" step="0.25" value="1"></label>
       <label>Colours
         <select id="colorMode">
           <option value="mixed">Both colours in each eye</option>
           <option value="split">Left eye colour 1, right eye colour 2</option>
         </select>
       </label>
+    </div>
+  </fieldset>
+
+  <fieldset id="shapeSettings">
+    <legend>Eye shape and motion</legend>
+    <div class="grid">
+      <label>Speed <output data-for="speed"></output><input type="range" id="speed" min="5" max="360" step="5" value="30"></label>
+      <label>Eye size <output data-for="radius"></output><input type="range" id="radius" min="3" max="6.5" step="0.25" value="6"></label>
+      <label>Eye width <output data-for="stretch"></output><input type="range" id="stretch" min="1" max="1.6" step="0.05" value="1.35"></label>
+      <label>Pupil <output data-for="pupil"></output><input type="range" id="pupil" min="0" max="3" step="0.25" value="1"></label>
       <label class="check"><input type="checkbox" id="smoothing" checked> Smooth edges</label>
       <label class="check"><input type="checkbox" id="mirrorSpin" checked> Eyes spin in opposite directions</label>
       <label class="check"><input type="checkbox" id="reverse"> Reverse spin</label>
@@ -210,6 +229,7 @@ function paintPacket(color, points) {
 const $ = id => document.getElementById(id);
 const settingIds = ["design", "color1", "color2",
   "drift", "mistScale", "warp", "mistShades", "dark", "balance", "edge", "hueSteps", "stars", "sameEyes",
+  "yyArms", "yyTwist", "yyTrail", "yyDot",
   "speed", "arms", "twist", "shades", "radius", "stretch", "pupil", "colorMode", "smoothing", "mirrorSpin", "reverse",
   "slides", "brightness", "gap", "flipX", "flipY"];
 const units = { speed: v => `${v}°/s`, gap: v => `${v} ms`, brightness: v => `${v}%` };
@@ -225,6 +245,8 @@ function readSettings() {
   s.hueSteps = Number(s.hueSteps);
   $("mistSettings").hidden = s.design !== "mist";
   $("swirlSettings").hidden = s.design !== "swirl";
+  $("yinyangSettings").hidden = s.design !== "yinyang";
+  $("shapeSettings").hidden = s.design === "mist";
   for (const out of document.querySelectorAll("output[data-for]")) {
     const v = s[out.dataset.for];
     out.textContent = units[out.dataset.for] ? units[out.dataset.for](v) : v;
@@ -289,6 +311,56 @@ function renderSwirl(t) {
         }
         const level = Math.round(clamp01(strength / (ss * ss)) * s.shades);
         if (level > 0) frame[row * W + col] = scale(base, Math.pow(level / s.shades, 1.8));
+      }
+    }
+  }
+  return frame;
+}
+
+// ---- Yin-yang: two colours that always touch, with no dark gap between them ----
+// Each half is a twisted wedge of the eye. It is brightest at its leading edge and dims toward its tail
+// (never to black), so one colour's bright head always presses against the other's dim tail.
+function renderYinYang(t) {
+  const frame = new Int32Array(W * H);
+  const cy = (H - 1) / 2, ss = s.smoothing ? 4 : 1, TAU = 2 * Math.PI, n = s.yyArms;
+  const dir = s.reverse ? -1 : 1;
+  const angle = dir * s.speed * Math.PI / 180 * t;
+  const r0 = s.radius / 2;  // dots sit halfway out, in the middle of each half
+  for (let eye = 0; eye < 2; eye++) {
+    const cx = eye * HALF + (HALF - 1) / 2;
+    const mirror = eye === 1 && s.mirrorSpin ? -1 : 1;
+    for (let row = 0; row < H; row++) {
+      for (let col = eye * HALF; col < (eye + 1) * HALF; col++) {
+        let inside = 0;
+        const votes = [0, 0], fracSum = [0, 0];
+        for (let sy = 0; sy < ss; sy++) {
+          for (let sx = 0; sx < ss; sx++) {
+            const px = col + (sx + 0.5) / ss - 0.5, py = row + (sy + 0.5) / ss - 0.5;
+            const dx = mirror * (px - cx) / s.stretch, dy = py - cy;
+            const r = Math.hypot(dx, dy);
+            if (r > s.radius || r < s.pupil) continue;
+            inside++;
+            const p = ((n * (Math.atan2(dy, dx) - angle + s.yyTwist * r)) % TAU + TAU) % TAU;
+            let half = p < Math.PI ? 0 : 1;
+            let frac = (p % Math.PI) / Math.PI;  // 0..1 across the half
+            if (s.yyDot > 0) {
+              for (let k = 0; k < 2; k++) {
+                for (let a = 0; a < n; a++) {
+                  const th = ((k + 0.5) * Math.PI + a * TAU) / n + angle - s.yyTwist * r0;
+                  if (Math.hypot(dx - r0 * Math.cos(th), dy - r0 * Math.sin(th)) < s.yyDot) { half = 1 - k; frac = 0.5; }
+                }
+              }
+            }
+            votes[half]++; fracSum[half] += frac;
+          }
+        }
+        if (inside * 2 < ss * ss) continue;  // mostly outside the eye
+        const half = votes[0] >= votes[1] ? 0 : 1;
+        const frac = fracSum[half] / votes[half];
+        // As the pattern turns forward an LED's phase falls, so each half arrives with its high-phase edge first.
+        const fromLead = Math.round((dir > 0 ? 1 - frac : frac) * 2) / 2;
+        // Linear dimming: the tail must stay clearly lit, or it reads as a gap between the colours.
+        frame[row * W + col] = scale(half === 0 ? s.rgb1 : s.rgb2, 1 - s.yyTrail * fromLead);
       }
     }
   }
@@ -687,9 +759,11 @@ async function uploadImage(payload, chunkSize) {
 
 // Frames for one seamless loop of the current design.
 function slideshowFrames(n) {
-  if (s.design === "swirl") {
-    const period = (2 * Math.PI / s.arms) / (s.speed * Math.PI / 180);  // seconds until the swirl looks the same again
-    return Array.from({ length: n }, (_, k) => renderSwirl(k * period / n));
+  if (s.design !== "mist") {
+    const repeats = s.design === "yinyang" ? s.yyArms : s.arms;
+    const period = (2 * Math.PI / repeats) / (s.speed * Math.PI / 180);  // seconds until the pattern looks the same again
+    const render = s.design === "yinyang" ? renderYinYang : renderSwirl;
+    return Array.from({ length: n }, (_, k) => render(k * period / n));
   }
   prevLevel.fill(-1); prevHue.fill(-1);
   return Array.from({ length: n }, (_, k) => renderMist(k * 0.5));
@@ -763,7 +837,7 @@ let slidePreview = null;
 function currentTarget(t) {
   if (mode === "test") return renderTest();
   if (mode === "slides") return slidePreview[Math.floor(t * 2) % slidePreview.length];
-  return s.design === "mist" ? renderMist(t) : renderSwirl(t);
+  return s.design === "mist" ? renderMist(t) : s.design === "yinyang" ? renderYinYang(t) : renderSwirl(t);
 }
 
 async function loop() {
