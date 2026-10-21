@@ -54,7 +54,6 @@
     <button id="connectAll" title="Use if the glasses don't appear in the list">Connect (show all devices)</button>
     <button id="test" disabled>Test pattern</button>
     <button id="swirl" disabled>Play design</button>
-    <button id="reenter" disabled title="Re-send the command that stops the built-in animation">Re-enter DIY mode</button>
     <button id="disconnect" disabled>Disconnect</button>
     <button id="pocketBtn" title="Black screen for the pocket; double-tap to leave">Pocket mode</button>
   </div>
@@ -466,23 +465,43 @@ function setStatus(text, cls = "") { $("status").textContent = text; $("status")
 
 function updateButtons() {
   $("connect").disabled = wantConnected; $("connectAll").disabled = wantConnected;
-  for (const id of ["test", "swirl", "reenter", "upload"]) $(id).disabled = !connected;
+  for (const id of ["test", "swirl", "upload"]) $(id).disabled = !connected;
   $("disconnect").disabled = !wantConnected;
 }
 
-async function writeCmd(data) {
-  if (cmdChar.properties.write) await cmdChar.writeValueWithResponse(data);
-  else await cmdChar.writeValueWithoutResponse(data);
+// Every Bluetooth write goes through one queue, so two writes never reach the glasses at the same time,
+// whichever button or timer started them.
+let gattQueue = Promise.resolve();
+function queued(op) {
+  const run = gattQueue.then(op);
+  gattQueue = run.catch(() => {});
+  return run;
 }
 
-async function writePaint(data) {
-  if (paintChar.properties.writeWithoutResponse) await paintChar.writeValueWithoutResponse(data);
-  else await paintChar.writeValueWithResponse(data);
+async function write(char, data, preferFast) {
+  return queued(() => preferFast && char.properties.writeWithoutResponse
+    ? char.writeValueWithoutResponse(data)
+    : char.properties.write ? char.writeValueWithResponse(data) : char.writeValueWithoutResponse(data));
 }
 
-async function writeData(data) {
-  if (dataChar.properties.writeWithoutResponse) await dataChar.writeValueWithoutResponse(data);
-  else await dataChar.writeValueWithResponse(data);
+const writeCmd = data => write(cmdChar, data, false);
+const writePaint = data => write(paintChar, data, true);
+const writeData = data => write(dataChar, data, true);
+
+// Commands (DIY mode, brightness, exit) run with the pixel stream stopped: the stream waits, the last
+// paint write finishes, and the glasses get a quiet moment before and after the command.
+let streamHolds = 0;
+async function withStreamPaused(fn) {
+  streamHolds++;
+  try {
+    await gattQueue;
+    await sleep(100);
+    const result = await fn();
+    await sleep(150);
+    return result;
+  } finally {
+    streamHolds--;
+  }
 }
 
 // Replies arrive as notifications; uploads wait for specific ones (DATSOK, REOK, ...).
@@ -566,11 +585,16 @@ async function setupGatt() {
 }
 
 // Enter live-paint mode with the screen cleared; this stops the built-in animation.
-async function enterDiy() {
-  await writeCmd(await command("SMVEW", 1));
-  log("Sent: enter DIY mode (clear screen).");
-  await sleep(300);
-  displayed = new Int32Array(W * H);  // all black after the clear
+// A second call while one is in progress shares it instead of sending the command again.
+let enteringDiy = null;
+function enterDiy() {
+  enteringDiy ??= withStreamPaused(async () => {
+    await writeCmd(await command("SMVEW", 1));
+    log("Sent: enter DIY mode (clear screen).");
+    await sleep(300);
+    displayed = new Int32Array(W * H);  // all black after the clear
+  }).finally(() => { enteringDiy = null; });
+  return enteringDiy;
 }
 
 function onDisconnected() {
@@ -605,8 +629,8 @@ async function reconnect() {
 async function disconnect() {
   wantConnected = false;
   if (device?.gatt.connected) {
-    if (mode !== "paused") {
-      try { await writeCmd(await command("SMVEW", 0)); } catch { /* leaving anyway */ }  // leave DIY mode without saving
+    if (mode !== "paused") {  // leave DIY mode without saving
+      try { await withStreamPaused(async () => writeCmd(await command("SMVEW", 0))); } catch { /* leaving anyway */ }
     }
     device.gatt.disconnect();
   }
@@ -620,7 +644,7 @@ let brightnessTimer = null;
 function sendBrightnessSoon() {
   clearTimeout(brightnessTimer);
   brightnessTimer = setTimeout(async () => {
-    if (connected) try { await writeCmd(await command("LIGHT", s.brightness)); } catch (err) { log(`Brightness failed: ${err.message}`); }
+    if (connected) try { await withStreamPaused(async () => writeCmd(await command("LIGHT", s.brightness))); } catch (err) { log(`Brightness failed: ${err.message}`); }
   }, 150);
 }
 
@@ -739,7 +763,7 @@ async function loop() {
   const t0 = performance.now();
   let packets = 0, pixels = 0, windowStart = t0, lastSend = t0, target = null;
   for (;;) {
-    if (mode === "paused") { await sleep(50); continue; }
+    if (mode === "paused" || streamHolds > 0) { await sleep(20); continue; }
     const start = performance.now();
     target = currentTarget((start - t0) / 1000);
     const packet = nextPacket(target, start - lastSend > 60);
@@ -801,9 +825,6 @@ $("swirl").onclick = async () => {
     try { await enterDiy(); } catch (err) { log(`Couldn't switch back: ${err.message}`); return; }
   }
   mode = "design";
-};
-$("reenter").onclick = async () => {
-  try { await enterDiy(); } catch (err) { log(`Re-enter failed: ${err.message}`); }
 };
 $("previewSlides").onclick = () => {
   if (mode === "paused") { log("The slideshow is playing on the glasses. Press Play design first."); return; }
